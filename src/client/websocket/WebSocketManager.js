@@ -332,12 +332,12 @@ class WebSocketManager extends EventEmitter {
    * @private
    */
   handlePacket(packet, shard) {
-    if (packet && shard.status !== Status.READY) {
-      if (!BeforeReadyWhitelist.includes(packet.t)) {
-        this.packetQueue.push({ packet, shard });
-        return false;
-      }
-    }
+    // if (packet && shard.status !== Status.READY) {
+    //   if (!BeforeReadyWhitelist.includes(packet.t)) {
+    //     this.packetQueue.push({ packet, shard });
+    //     return false;
+    //   }
+    // }
 
     if (this.packetQueue.length) {
       const item = this.packetQueue.shift();
