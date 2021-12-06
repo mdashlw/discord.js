@@ -179,7 +179,7 @@ class Webhook {
    *   .then(console.log)
    *   .catch(console.error);
    */
-  async send({ wait, threadId, ...payload }) {
+  async send({ threadId, wait, ...payload }) {
     if (!this.token) {
       throw new Error('WEBHOOK_TOKEN_UNAVAILABLE');
     }
@@ -193,8 +193,8 @@ class Webhook {
       data,
       files,
       query: {
-        wait,
         thread_id: threadId,
+        wait,
       },
       auth: false,
     });
@@ -223,14 +223,20 @@ class Webhook {
    * }).catch(console.error);
    * @see {@link https://api.slack.com/messaging/webhooks}
    */
-  async sendSlackMessage(body) {
-    if (!this.token) throw new Error('WEBHOOK_TOKEN_UNAVAILABLE');
+  async sendSlackMessage({ threadId, wait, ...payload }) {
+    if (!this.token) {
+      throw new Error('WEBHOOK_TOKEN_UNAVAILABLE');
+    }
 
     const data = await this.client.api.webhooks(this.id, this.token).slack.post({
-      query: { wait: true },
+      data: payload,
+      query: {
+        thread_id: threadId,
+        wait,
+      },
       auth: false,
-      data: body,
     });
+
     return data.toString() === 'ok';
   }
 
