@@ -343,9 +343,9 @@ class WebSocketShard extends EventEmitter {
     this.sequence = -1;
 
     this.debug(`[CLOSE]
-    Event Code: ${event.code}
-    Clean     : ${event.wasClean}
-    Reason    : ${event.reason ?? 'No reason received'}`);
+    Code: ${event.code}
+    Reason: ${event.reason || '<none>'}
+    Clean?: ${event.wasClean}`);
 
     this.setHeartbeatTimer(-1);
     this.setHelloTimeout(-1);
