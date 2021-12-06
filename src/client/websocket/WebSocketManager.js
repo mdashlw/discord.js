@@ -9,7 +9,7 @@ const { Error } = require('../../errors');
 const { Events, ShardEvents, Status, WSCodes, WSEvents } = require('../../util/Constants');
 const Util = require('../../util/Util');
 
-const BeforeReadyWhitelist = [
+const BeforeReadyWhitelist = new Set([
   WSEvents.READY,
   WSEvents.RESUMED,
   WSEvents.GUILD_CREATE,
@@ -17,14 +17,14 @@ const BeforeReadyWhitelist = [
   WSEvents.GUILD_MEMBERS_CHUNK,
   WSEvents.GUILD_MEMBER_ADD,
   WSEvents.GUILD_MEMBER_REMOVE,
-];
+]);
 
-const UNRECOVERABLE_CLOSE_CODES = Object.keys(WSCodes).slice(1).map(Number);
-const UNRESUMABLE_CLOSE_CODES = [
+const UNRECOVERABLE_CLOSE_CODES = new Set(Object.keys(WSCodes).slice(1).map(Number));
+const UNRESUMABLE_CLOSE_CODES = new Set([
   RPCErrorCodes.UnknownError,
   RPCErrorCodes.InvalidPermissions,
   RPCErrorCodes.InvalidClientId,
-];
+]);
 
 /**
  * The WebSocket manager for this client.
@@ -125,39 +125,36 @@ class WebSocketManager extends EventEmitter {
    * @private
    */
   async connect() {
-    const invalidToken = new Error(WSCodes[4004]);
-    const {
-      url: gatewayURL,
-      shards: recommendedShards,
-      session_start_limit: sessionStartLimit,
-    } = await this.client.api.gateway.bot.get().catch(error => {
-      throw error.httpStatus === 401 ? invalidToken : error;
-    });
+    const { url, shards, session_start_limit: sessionStartLimit } = await this.client.api.gateway.bot.get();
 
-    const { total, remaining } = sessionStartLimit;
+    this.debug(`Gateway Information
+    URL: ${url}
+    Shards: ${shards}`);
 
-    this.debug(`Fetched Gateway Information
-    URL: ${gatewayURL}
-    Recommended Shards: ${recommendedShards}`);
+    {
+      const { total, remaining, reset_after: resetAfter, max_concurrency: maxConcurrency } = sessionStartLimit;
 
-    this.debug(`Session Limit Information
+      this.debug(`Session Start Limit Information
     Total: ${total}
-    Remaining: ${remaining}`);
-
-    this.gateway = `${gatewayURL}/`;
-
-    let { shards } = this.client.options;
-
-    if (shards === 'auto') {
-      this.debug(`Using the recommended shard count provided by Discord: ${recommendedShards}`);
-      this.totalShards = this.client.options.shardCount = recommendedShards;
-      shards = this.client.options.shards = Array.from({ length: recommendedShards }, (_, i) => i);
+    Remaining: ${remaining}
+    Reset After: ${resetAfter}ms
+    Max Concurrency: ${maxConcurrency}`);
     }
 
-    this.totalShards = shards.length;
-    this.debug(`Spawning shards: ${shards.join(', ')}`);
-    this.shardQueue = new Set(shards.map(id => new WebSocketShard(this, id)));
+    this.gateway = url;
 
+    if (this.client.options.shards === 'auto') {
+      this.debug(`Connecting using the recommended number of shards: ${shards}`);
+      this.client.options.shardCount = shards;
+      this.client.options.shards = Array.from({ length: shards }, (_, index) => index);
+    }
+
+    const shardIds = this.client.options.shards;
+
+    this.totalShards = shardIds.length;
+    this.shardQueue = new Set(shardIds.map(id => new WebSocketShard(this, id)));
+
+    this.debug(`Identifying ${this.totalShards} shards: ${shardIds.join(', ')}`);
     return this.createShards();
   }
 
@@ -189,7 +186,7 @@ class WebSocketManager extends EventEmitter {
       });
 
       shard.on(ShardEvents.CLOSE, event => {
-        if (event.code === 1_000 ? this.destroyed : UNRECOVERABLE_CLOSE_CODES.includes(event.code)) {
+        if (event.code === 1_000 ? this.destroyed : UNRECOVERABLE_CLOSE_CODES.has(event.code)) {
           /**
            * Emitted when a shard's WebSocket disconnects and will no longer reconnect.
            * @event Client#shardDisconnect
@@ -201,7 +198,7 @@ class WebSocketManager extends EventEmitter {
           return;
         }
 
-        if (UNRESUMABLE_CLOSE_CODES.includes(event.code)) {
+        if (UNRESUMABLE_CLOSE_CODES.has(event.code)) {
           // These event codes cannot be resumed
           shard.sessionId = null;
         }
@@ -245,7 +242,7 @@ class WebSocketManager extends EventEmitter {
     try {
       await shard.connect();
     } catch (error) {
-      if (error?.code && UNRECOVERABLE_CLOSE_CODES.includes(error.code)) {
+      if (error?.code && UNRECOVERABLE_CLOSE_CODES.has(error.code)) {
         throw new Error(WSCodes[error.code]);
         // Undefined if session is invalid, error event for regular closes
       } else if (!error || error.code) {
@@ -332,21 +329,19 @@ class WebSocketManager extends EventEmitter {
    * @private
    */
   handlePacket(packet, shard) {
-    // if (packet && shard.status !== Status.READY) {
-    //   if (!BeforeReadyWhitelist.includes(packet.t)) {
-    //     this.packetQueue.push({ packet, shard });
-    //     return false;
-    //   }
-    // }
+    if (packet && this.status !== Status.READY) {
+      if (!BeforeReadyWhitelist.has(packet.t)) {
+        this.packetQueue.push({ packet, shard });
+        return false;
+      }
+    }
 
     if (this.packetQueue.length) {
       const item = this.packetQueue.shift();
-      setImmediate(() => {
-        this.handlePacket(item.packet, item.shard);
-      }).unref();
+      setImmediate(() => this.handlePacket(item.packet, item.shard)).unref();
     }
 
-    if (packet && PacketHandlers[packet.t]) {
+    if (packet && packet.t in PacketHandlers) {
       PacketHandlers[packet.t](this.client, packet, shard);
     }
 

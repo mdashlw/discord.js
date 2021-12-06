@@ -408,16 +408,29 @@ class WebSocketShard extends EventEmitter {
     if (packet.s > this.sequence) this.sequence = packet.s;
 
     switch (packet.op) {
-      case Opcodes.HELLO:
-        this.setHelloTimeout(-1);
-        this.setHeartbeatTimer(packet.d.heartbeat_interval);
-        this.identify();
+      case Opcodes.DISPATCH: {
+        this.manager.handlePacket(packet, this);
+
+        if (
+          this.status === Status.WAITING_FOR_GUILDS &&
+          (packet.t === WSEvents.GUILD_CREATE || packet.t === WSEvents.GUILD_DELETE)
+        ) {
+          this.expectedGuilds.delete(packet.d.id);
+          this.checkReady();
+        }
+
         break;
-      case Opcodes.RECONNECT:
+      }
+      case Opcodes.HEARTBEAT: {
+        this.sendHeartbeat('HeartbeatRequest', true);
+        break;
+      }
+      case Opcodes.RECONNECT: {
         this.debug('[RECONNECT] Discord asked us to reconnect');
         this.destroy({ closeCode: 4_000 });
         break;
-      case Opcodes.INVALID_SESSION:
+      }
+      case Opcodes.INVALID_SESSION: {
         this.debug(`[INVALID SESSION] Resumable: ${packet.d}.`);
         // If we can resume the session, do so immediately
         if (packet.d) {
@@ -433,18 +446,17 @@ class WebSocketShard extends EventEmitter {
         // Finally, emit the INVALID_SESSION event
         this.emit(ShardEvents.INVALID_SESSION);
         break;
-      case Opcodes.HEARTBEAT_ACK:
+      }
+      case Opcodes.HELLO: {
+        this.setHelloTimeout(-1);
+        this.setHeartbeatTimer(packet.d.heartbeat_interval);
+        this.identify();
+        break;
+      }
+      case Opcodes.HEARTBEAT_ACK: {
         this.ackHeartbeat();
         break;
-      case Opcodes.HEARTBEAT:
-        this.sendHeartbeat('HeartbeatRequest', true);
-        break;
-      default:
-        this.manager.handlePacket(packet, this);
-        if (this.status === Status.WAITING_FOR_GUILDS && packet.t === WSEvents.GUILD_CREATE) {
-          this.expectedGuilds.delete(packet.d.id);
-          this.checkReady();
-        }
+      }
     }
   }
 
