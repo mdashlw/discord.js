@@ -179,25 +179,30 @@ class Webhook {
    *   .then(console.log)
    *   .catch(console.error);
    */
-  async send(options) {
-    if (!this.token) throw new Error('WEBHOOK_TOKEN_UNAVAILABLE');
-
-    let messagePayload;
-
-    if (options instanceof MessagePayload) {
-      messagePayload = options.resolveData();
-    } else {
-      messagePayload = MessagePayload.create(this, options).resolveData();
+  async send({ wait, threadId, ...payload }) {
+    if (!this.token) {
+      throw new Error('WEBHOOK_TOKEN_UNAVAILABLE');
     }
 
-    const { data, files } = await messagePayload.resolveFiles();
-    const d = await this.client.api.webhooks(this.id, this.token).post({
+    if (!(payload instanceof MessagePayload)) {
+      payload = MessagePayload.create(this, payload);
+    }
+
+    const { data, files } = await payload.resolveData().resolveFiles();
+    const messageData = await this.client.api.webhooks(this.id, this.token).post({
       data,
       files,
-      query: { thread_id: messagePayload.options.threadId, wait: true },
+      query: {
+        wait,
+        thread_id: threadId,
+      },
       auth: false,
     });
-    return this.client.channels?.cache.get(d.channel_id)?.messages._add(d, false) ?? d;
+
+    return (
+      messageData &&
+      (this.client.channels?.cache.get(messageData.channel_id)?.messages._add(messageData, false) ?? messageData)
+    );
   }
 
   /**
